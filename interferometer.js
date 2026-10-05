@@ -18,7 +18,7 @@ var PARAMS = [
   { table: "geomControls", stacked: true, id: "Ld",     label: "Beamsplitter to screen distance", unit: "mm", min: 0,  max: 500,  step: 1,    value: 100 },
   { table: "geomControls", stacked: true, id: "fov",    label: "Image width",                unit: "mm",   min: 1,    max: 50,   step: 0.1,  value: 10 },
   { table: "specControls",  id: "lambdaC", label: "Center wavelength", unit: "nm", min: LAMBDA_MIN, max: LAMBDA_MAX, step: 1,   value: 550 },
-  { table: "specControls",  id: "fwhm",    label: "FWHM",              unit: "nm", min: 0.1,        max: 400,        step: 0.1, value: 100 },
+  { table: "specControls",  id: "fwhm",    label: "FWHM",              unit: "nm", min: 0.01,       max: 400,        log: true, value: 100 },
   { table: "phaseControls", id: "lambdaP", label: "Wavelength",        unit: "nm", min: LAMBDA_MIN, max: LAMBDA_MAX, step: 1,   value: 550 }
 ];
 
@@ -44,18 +44,23 @@ function buildControls() {
     range.type = "range";
     var number = document.createElement("input");
     number.type = "number";
-    [range, number].forEach(function (el) {
-      el.min = p.min; el.max = p.max; el.step = p.step; el.value = p.value;
-    });
+    number.min = p.min; number.max = p.max; number.step = p.log ? "any" : p.step;
+    if (p.log) {   // slider position is log10 of the value
+      range.min = Math.log10(p.min); range.max = Math.log10(p.max); range.step = 0.001;
+    } else {
+      range.min = p.min; range.max = p.max; range.step = p.step;
+    }
     range.addEventListener("input", function () {
-      number.value = range.value;
-      P[p.id] = parseFloat(range.value);
+      var v = parseFloat(range.value);
+      if (p.log) v = parseFloat(Math.pow(10, v).toPrecision(3));
+      number.value = v;
+      P[p.id] = v;
       requestUpdate(true);
     });
     number.addEventListener("input", function () {
       var v = parseFloat(number.value);
-      if (isNaN(v)) return;
-      range.value = v;       // slider clamps itself; typed value may exceed the slider range
+      if (isNaN(v) || (p.log && v <= 0)) return;
+      range.value = p.log ? Math.log10(v) : v;   // slider clamps itself; typed value may exceed the slider range
       P[p.id] = v;
       requestUpdate(true);
     });
@@ -65,34 +70,162 @@ function buildControls() {
     tr.appendChild(tdRange); tr.appendChild(tdNumber); tr.appendChild(tdUnit);
     table.appendChild(tr);
     inputs[p.id] = { range: range, number: number };
-    P[p.id] = p.value;
+    setParam(p, p.value);
   });
 }
 
+function setParam(p, v) {
+  inputs[p.id].number.value = v;
+  inputs[p.id].range.value = p.log ? Math.log10(v) : v;
+  P[p.id] = v;
+}
+
+// Non-slider options (drop-downs and checkboxes), by element id.
+var OPTIONS = [
+  { id: "source",    value: "gaussian" },
+  { id: "phaseMode", value: "wrapped" },
+  { id: "showCones", value: false },
+  { id: "logY",      value: false }
+];
+
+function getOption(id) {
+  var el = document.getElementById(id);
+  return el.type === "checkbox" ? el.checked : el.value;
+}
+
+function setOption(o, v) {
+  var el = document.getElementById(o.id);
+  if (el.type === "checkbox") { el.checked = !!v; return; }
+  el.value = v;
+  if (el.value !== v) el.value = o.value;   // not one of the choices
+}
+
+// Grey out the spectrum sliders that the selected source does not use.
+function updateEnabled() {
+  var src = getOption("source");
+  function enable(id, on) {
+    inputs[id].range.disabled = !on;
+    inputs[id].number.disabled = !on;
+  }
+  enable("lambdaC", src === "gaussian" || src === "laser");
+  enable("fwhm", src === "gaussian");
+}
+
 function resetControls() {
-  PARAMS.forEach(function (p) {
-    inputs[p.id].range.value = p.value;
-    inputs[p.id].number.value = p.value;
-    P[p.id] = p.value;
-  });
+  PARAMS.forEach(function (p) { setParam(p, p.value); });
+  OPTIONS.forEach(function (o) { setOption(o, o.value); });
   sel.x = 0; sel.y = 0;
+  updateEnabled();
   requestUpdate(true);
+}
+
+// ---------------------------------------------------------------------------
+// Share link: the full UI state is stored in the URL hash
+// ---------------------------------------------------------------------------
+
+function stateToHash() {
+  var parts = PARAMS.map(function (p) { return p.id + "=" + P[p.id]; });
+  OPTIONS.forEach(function (o) {
+    var v = getOption(o.id);
+    parts.push(o.id + "=" + (typeof v === "boolean" ? (v ? 1 : 0) : encodeURIComponent(v)));
+  });
+  parts.push("x=" + parseFloat(sel.x.toFixed(4)), "y=" + parseFloat(sel.y.toFixed(4)));
+  return parts.join("&");
+}
+
+function applyHash() {
+  var kv = {};
+  location.hash.replace(/^#/, "").split("&").forEach(function (part) {
+    var i = part.indexOf("=");
+    if (i > 0) kv[part.slice(0, i)] = decodeURIComponent(part.slice(i + 1));
+  });
+  PARAMS.forEach(function (p) {
+    var v = parseFloat(kv[p.id]);
+    if (isFinite(v) && !(p.log && v <= 0)) setParam(p, v);
+  });
+  OPTIONS.forEach(function (o) {
+    if (!(o.id in kv)) return;
+    setOption(o, typeof o.value === "boolean" ? kv[o.id] === "1" : kv[o.id]);
+  });
+  if (isFinite(parseFloat(kv.x))) sel.x = parseFloat(kv.x);
+  if (isFinite(parseFloat(kv.y))) sel.y = parseFloat(kv.y);
+  updateEnabled();
+  requestUpdate(true);
+}
+
+function shareLink() {
+  var url = location.href.split("#")[0] + "#" + stateToHash();
+  history.replaceState(null, "", url);
+  var box = document.getElementById("shareUrl"), status = document.getElementById("shareStatus");
+  box.value = url;
+  box.style.display = "";
+  box.select();
+  status.textContent = "Copy the link above.";
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(function () {
+      status.textContent = "Link copied to clipboard.";
+    }, function () {});
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Optics
 // ---------------------------------------------------------------------------
 
-// Source spectrum (relative spectral intensity vs wavelength in nm).
-// Swap this out to support other spectra later.
-function sourceSpectrum(lam) {
-  var u = (lam - P.lambdaC) / P.fwhm;
-  return Math.exp(-4 * Math.LN2 * u * u);
+// Source spectra. Each source is a list of components whose spectral
+// intensities add. A component is one of
+//   { center, fwhm, amp }     Gaussian with peak height amp (wavelengths in nm)
+//   { center, fwhm: 0, amp }  ideal monochromatic line
+//   { f, amp }                arbitrary smooth function f(lambda), peak ~1
+function gauss(center, fwhm, amp) { return { center: center, fwhm: fwhm, amp: amp }; }
+
+// Planck spectrum per unit wavelength at the Sun's effective temperature,
+// normalized to 1 at its peak.
+var SUN_T = 5778, HC_K = 1.4388e7;   // K, nm*K
+function planck(lam) { return Math.pow(lam, -5) / (Math.exp(HC_K / (lam * SUN_T)) - 1); }
+var PLANCK_PEAK = planck(2.898e6 / SUN_T);
+function sunlight(lam) { return planck(lam) / PLANCK_PEAK; }
+
+// Fraction of a laser-phosphor flashlight's power left in the blue pump line.
+var PHOSPHOR_BLUE_FRACTION = 0.2;
+
+var SOURCES = {
+  gaussian: function () { return [gauss(P.lambdaC, Math.max(P.fwhm, 1e-6), 1)]; },
+  laser:    function () { return [gauss(P.lambdaC, 0, 1)]; },
+  sun:      function () { return [{ f: sunlight, amp: 1 }]; },
+  // Approximate tri-phosphor fluorescent lamp: mercury lines plus the
+  // blue, green (Tb) and red (Eu) phosphor emission bands.
+  fluorescent: function () {
+    return [
+      gauss(404.7, 1.5, 0.15), gauss(435.8, 1.5, 0.60), gauss(450, 50, 0.12),
+      gauss(487, 8, 0.20),     gauss(544, 6, 1.00),     gauss(580, 10, 0.20),
+      gauss(611, 5, 0.90),     gauss(630, 8, 0.20),     gauss(707, 5, 0.05)
+    ];
+  },
+  // Blue pump laser plus broad phosphor emission; amplitudes set so the
+  // integrated powers split as PHOSPHOR_BLUE_FRACTION : (1 - PHOSPHOR_BLUE_FRACTION).
+  phosphor: function () {
+    var b = PHOSPHOR_BLUE_FRACTION;
+    return [gauss(450, 0.1, b / (1 - b) * 100 / 0.1), gauss(570, 100, 1)];
+  }
+};
+
+function currentSource() {
+  return (SOURCES[getOption("source")] || SOURCES.gaussian)();
 }
 
-// Wavelength range (nm) outside of which the source is treated as zero.
-function sourceRange() {
-  return [Math.max(50, P.lambdaC - 2 * P.fwhm), P.lambdaC + 2 * P.fwhm];
+// Spectral intensity of the continuous part of a source (monochromatic lines excluded).
+function sourceSpectrum(comps, lam) {
+  var sum = 0;
+  for (var i = 0; i < comps.length; i++) {
+    var c = comps[i];
+    if (c.f) sum += c.amp * c.f(lam);
+    else if (c.fwhm > 0) {
+      var u = (lam - c.center) / c.fwhm;
+      sum += c.amp * Math.exp(-4 * Math.LN2 * u * u);
+    }
+  }
+  return sum;
 }
 
 // Geometry in SI units, derived from the UI parameters.
@@ -198,24 +331,41 @@ function toByte(v) {
 // Quadrature weights for the RGB integrals. Samples are uniform in wavenumber
 // (1/lambda) so that the fringe phase advances by a constant step from sample
 // to sample for a given OPD.
-function spectralWeights() {
-  var rng = sourceRange();
-  var lo = Math.max(rng[0], 360), hi = Math.min(rng[1], 830);
-  var w = { n: 0, s0: 0, ds: 0, r: null, g: null, b: null, R0: 0, G0: 0, B0: 0, norm: 0 };
-  if (!(hi > lo)) return w;   // no visible light
-  var n = Math.ceil((hi - lo) / Math.min(5, P.fwhm / 8));
-  n = Math.max(8, Math.min(160, n));
-  var ds = (1 / lo - 1 / hi) / n;
-  w.n = n; w.ds = ds; w.s0 = 1 / hi + 0.5 * ds;
-  w.r = new Float64Array(n); w.g = new Float64Array(n); w.b = new Float64Array(n);
-  for (var j = 0; j < n; j++) {
-    var lam = 1 / (w.s0 + j * ds);
-    var q = sourceSpectrum(lam) * lam * lam * ds;   // S(lambda) d(lambda)
-    var xyz = cieXYZ(lam);
-    var rgb = xyzToLinearSRGB(q * xyz[0], q * xyz[1], q * xyz[2]);
-    w.r[j] = rgb[0]; w.g[j] = rgb[1]; w.b[j] = rgb[2];
-    w.R0 += rgb[0]; w.G0 += rgb[1]; w.B0 += rgb[2];
-  }
+// Each source component gets its own set of samples, so narrow lines and
+// broad bands are both resolved. A monochromatic line is a single sample
+// with zero bin width (no integration needed).
+function spectralWeights(comps) {
+  var VIS_LO = 360, VIS_HI = 830;
+  var w = { parts: [], R0: 0, G0: 0, B0: 0, norm: 0 };
+  comps.forEach(function (c) {
+    var line = !c.f && !(c.fwhm > 0);
+    var lo = VIS_LO, hi = VIS_HI, n = 1, ds = 0, step = 5;
+    if (line) {
+      if (c.center < VIS_LO || c.center > VIS_HI) return;
+    } else {
+      if (!c.f) {
+        lo = Math.max(lo, c.center - 2 * c.fwhm);
+        hi = Math.min(hi, c.center + 2 * c.fwhm);
+        step = Math.min(5, c.fwhm / 4);
+      }
+      if (!(hi > lo)) return;   // no visible light
+      n = Math.max(8, Math.min(160, Math.ceil((hi - lo) / step)));
+      ds = (1 / lo - 1 / hi) / n;
+    }
+    var part = {
+      n: n, ds: ds, s0: line ? 1 / c.center : 1 / hi + 0.5 * ds,
+      r: new Float64Array(n), g: new Float64Array(n), b: new Float64Array(n)
+    };
+    for (var j = 0; j < n; j++) {
+      var lam = 1 / (part.s0 + j * ds);
+      var q = line ? c.amp : sourceSpectrum([c], lam) * lam * lam * ds;   // S(lambda) d(lambda)
+      var xyz = cieXYZ(lam);
+      var rgb = xyzToLinearSRGB(q * xyz[0], q * xyz[1], q * xyz[2]);
+      part.r[j] = rgb[0]; part.g[j] = rgb[1]; part.b[j] = rgb[2];
+      w.R0 += rgb[0]; w.G0 += rgb[1]; w.B0 += rgb[2];
+    }
+    w.parts.push(part);
+  });
   var m = Math.max(w.R0, w.G0, w.B0);
   w.norm = m > 1e-12 ? 1 / m : 0;   // bright fringe -> full scale
   return w;
@@ -250,27 +400,33 @@ function computeField() {
   }
 
   // --- RGB image ---
-  var w = spectralWeights();
+  var w = spectralWeights(currentSource());
   var out = rgbBuf.img.data;
-  var n = w.n, wr = w.r, wg = w.g, wb = w.b;
+  var parts = w.parts, np = parts.length;
   var TWO_PI = 2 * Math.PI;
   for (k = 0; k < N * N; k++) {
     var d = opd[k];
-    var a0 = TWO_PI * d * w.s0, da = TWO_PI * d * w.ds;
-    var c = Math.cos(a0), s = Math.sin(a0), cd = Math.cos(da), sd = Math.sin(da);
-    var r = 0, gg = 0, b = 0, t;
-    for (j = 0; j < n; j++) {
-      r += wr[j] * c; gg += wg[j] * c; b += wb[j] * c;
-      t = c * cd - s * sd; s = s * cd + c * sd; c = t;
+    var R = 0, G = 0, B = 0;
+    for (var m = 0; m < np; m++) {
+      var part = parts[m];
+      var n = part.n, wr = part.r, wg = part.g, wb = part.b;
+      var a0 = TWO_PI * d * part.s0, da = TWO_PI * d * part.ds;
+      var c = Math.cos(a0), s = Math.sin(a0), cd = Math.cos(da), sd = Math.sin(da);
+      var r = 0, gg = 0, b = 0, t;
+      for (j = 0; j < n; j++) {
+        r += wr[j] * c; gg += wg[j] * c; b += wb[j] * c;
+        t = c * cd - s * sd; s = s * cd + c * sd; c = t;
+      }
+      // Averaging the cosine over each sample's wavenumber bin gives a sinc
+      // factor; this washes fringes out (rather than aliasing) at large OPD.
+      var h = 0.5 * da;
+      var v = Math.abs(h) < 1e-9 ? 1 : Math.sin(h) / h;
+      R += v * r; G += v * gg; B += v * b;
     }
-    // Averaging the cosine over each sample's wavenumber bin gives a sinc
-    // factor; this washes fringes out (rather than aliasing) at large OPD.
-    var h = 0.5 * da;
-    var v = Math.abs(h) < 1e-9 ? 1 : Math.sin(h) / h;
     var o = 4 * k;
-    out[o]     = toByte(0.5 * (w.R0 + v * r) * w.norm);
-    out[o + 1] = toByte(0.5 * (w.G0 + v * gg) * w.norm);
-    out[o + 2] = toByte(0.5 * (w.B0 + v * b) * w.norm);
+    out[o]     = toByte(0.5 * (w.R0 + R) * w.norm);
+    out[o + 1] = toByte(0.5 * (w.G0 + G) * w.norm);
+    out[o + 2] = toByte(0.5 * (w.B0 + B) * w.norm);
     out[o + 3] = 255;
   }
   rgbBuf.ctx.putImageData(rgbBuf.img, 0, 0);
@@ -456,13 +612,39 @@ function drawSpectrum() {
     if (logY) v = v > 1e-6 ? Math.log10(v) : -6;   // below the axis floor; clipped
     return y0 + h - (v - ymin) / (ymax - ymin) * h;
   }
-  function trace(f, color, dash) {
-    var n = 4 * w;
-    ctx.beginPath();
-    for (var i = 0; i <= n; i++) {
-      var lam = lo + (hi - lo) * i / n;
-      if (i === 0) ctx.moveTo(X(lam), Y(f(lam))); else ctx.lineTo(X(lam), Y(f(lam)));
+  // Sample wavelengths: a uniform grid, plus extra points across any
+  // component too narrow for the grid to resolve.
+  var comps = currentSource(), lams = [], i;
+  for (i = 0; i <= 4 * w; i++) lams.push(lo + (hi - lo) * i / (4 * w));
+  var peak = 0;
+  comps.forEach(function (c) {
+    peak = Math.max(peak, c.amp);
+    if (c.f || !(c.fwhm > 0) || c.fwhm > 4) return;
+    for (var j = -40; j <= 40; j++) {
+      var lam = c.center + j * c.fwhm / 20;
+      if (lam > lo && lam < hi) lams.push(lam);
     }
+  });
+  lams.sort(function (a, b) { return a - b; });
+  var scale = 1 / peak;   // plot is normalized to the tallest component
+
+  function fringe(lam) { return 0.5 * (1 + Math.cos(2 * Math.PI * d / lam)); }
+  function trace(f, color, dash) {
+    ctx.beginPath();
+    for (var i = 0; i < lams.length; i++) {
+      if (i === 0) ctx.moveTo(X(lams[i]), Y(f(lams[i]))); else ctx.lineTo(X(lams[i]), Y(f(lams[i])));
+    }
+    ctx.strokeStyle = color; ctx.setLineDash(dash); ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+  // Monochromatic lines are drawn as vertical sticks.
+  function sticks(f, color, dash) {
+    ctx.beginPath();
+    comps.forEach(function (c) {
+      if (c.f || c.fwhm > 0) return;
+      var x = Math.round(X(c.center)) + 0.5;
+      ctx.moveTo(x, y0 + h); ctx.lineTo(x, Y(c.amp * scale * f(c.center)));
+    });
     ctx.strokeStyle = color; ctx.setLineDash(dash); ctx.lineWidth = 1;
     ctx.stroke();
   }
@@ -481,10 +663,10 @@ function drawSpectrum() {
       legend.push(["— " + cone[0], cone[1]]);
     });
   }
-  trace(sourceSpectrum, "#888", [5, 4]);
-  trace(function (lam) {
-    return sourceSpectrum(lam) * 0.5 * (1 + Math.cos(2 * Math.PI * d / lam));
-  }, "#000", []);
+  trace(function (lam) { return scale * sourceSpectrum(comps, lam); }, "#888", [5, 4]);
+  sticks(function () { return 1; }, "#888", [5, 4]);
+  trace(function (lam) { return scale * sourceSpectrum(comps, lam) * fringe(lam); }, "#000", []);
+  sticks(fringe, "#000", []);
   ctx.restore();
   drawAxes(ctx, x0, y0, w, h, lo, hi, ymin, ymax, "Wavelength (nm)", "Spectral intensity (rel.)", logY);
 
@@ -543,6 +725,10 @@ function attachPointSelection(panel) {
 buildControls();
 attachPointSelection(rgbPanel);
 attachPointSelection(phasePanel);
+document.getElementById("source").addEventListener("change", function () { updateEnabled(); requestUpdate(true); });
+document.getElementById("shareBtn").addEventListener("click", shareLink);
+window.addEventListener("hashchange", applyHash);
+applyHash();
 document.getElementById("phaseMode").addEventListener("change", function () { requestUpdate(true); });
 document.getElementById("showCones").addEventListener("change", function () { requestUpdate(false); });
 document.getElementById("logY").addEventListener("change", function () { requestUpdate(false); });

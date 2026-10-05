@@ -9,13 +9,15 @@ dependencies.
 
 ## Run locally
 
-Open `index.html` in a browser (double-click it). Nothing else is needed.
-
-If you prefer serving it over HTTP, any static server works, e.g.
+From the repository folder, start the included server (needs Node.js, no
+packages to install):
 
 ```
-npx http-server .
+node serve.js
 ```
+
+then open http://localhost:8000/ in a browser. Press Ctrl+C in the terminal to
+stop it. To use a different port: `node serve.js 8080`.
 
 ## Deploy with GitHub Pages
 

@@ -47,6 +47,20 @@
 
     <b>Spectral intensity at selected point</b><br>
     <canvas id="specCanvas" width="400" height="250"></canvas>
+    <table class="controls" style="margin-bottom: 0">
+      <tr>
+        <td>Source</td>
+        <td>
+          <select id="source">
+            <option value="gaussian">Gaussian (adjustable)</option>
+            <option value="laser">Monochromatic laser</option>
+            <option value="sun">Sunlight (5778 K blackbody)</option>
+            <option value="fluorescent">Fluorescent lamp (tri-phosphor)</option>
+            <option value="phosphor">Laser-excited phosphor flashlight</option>
+          </select>
+        </td>
+      </tr>
+    </table>
     <table class="controls" id="specControls"></table>
     <label><input type="checkbox" id="showCones"> Show cone responsivities (L, M, S)</label><br>
     <label><input type="checkbox" id="logY"> Log Y axis</label>
@@ -55,6 +69,11 @@
     <b>Interferometer</b>
     <table class="controls" id="geomControls"></table>
     <button id="resetBtn" type="button">Reset all to defaults</button>
+    <button id="shareBtn" type="button">Get share link</button>
+    <p>
+      <input type="text" id="shareUrl" readonly size="36" style="display: none"><br>
+      <small id="shareStatus"></small>
+    </p>
   </td>
 </tr>
 </table>
