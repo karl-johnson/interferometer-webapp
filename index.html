@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Michelson Interferometer - Polychromatic Fringes</title>
+<style>
+  body { font-family: serif; margin: 12px; }
+  canvas { border: 1px solid #888; touch-action: none; }
+  #rgbCanvas, #phaseCanvas { cursor: crosshair; }
+  table.layout td { vertical-align: top; padding-right: 12px; }
+  table.controls { margin-bottom: 8px; }
+  table.controls td { padding: 1px 6px 1px 0; white-space: nowrap; vertical-align: middle; }
+  table.controls td.stackedLabel { padding-top: 7px; }
+  table.controls input[type=range] { width: 140px; }
+  table.controls input[type=number] { width: 70px; }
+  #geomControls input[type=range] { width: 190px; }
+  #info { max-width: 520px; }
+</style>
+</head>
+<body>
+
+<h2>Michelson Interferometer with Polychromatic Illumination</h2>
+
+<table class="layout">
+<tr>
+  <td>
+    <b>Interference pattern (RGB)</b><br>
+    <canvas id="rgbCanvas" width="520" height="515"></canvas>
+    <p id="info">&nbsp;</p>
+    <p><small>Click or drag on either image to select the point used for the spectrum plot.</small></p>
+  </td>
+  <td>
+    <b id="phaseTitle">Phase difference</b><br>
+    <canvas id="phaseCanvas" width="400" height="280"></canvas>
+    <table class="controls" id="phaseControls"></table>
+    <table class="controls">
+      <tr>
+        <td>Display</td>
+        <td>
+          <select id="phaseMode">
+            <option value="wrapped">Wrapped (-&pi; to &pi;)</option>
+            <option value="unwrapped">Unwrapped</option>
+          </select>
+        </td>
+      </tr>
+    </table>
+
+    <b>Spectral intensity at selected point</b><br>
+    <canvas id="specCanvas" width="400" height="250"></canvas>
+    <table class="controls" id="specControls"></table>
+    <label><input type="checkbox" id="showCones"> Show cone responsivities (L, M, S)</label><br>
+    <label><input type="checkbox" id="logY"> Log Y axis</label>
+  </td>
+  <td>
+    <b>Interferometer</b>
+    <table class="controls" id="geomControls"></table>
+    <button id="resetBtn" type="button">Reset all to defaults</button>
+  </td>
+</tr>
+</table>
+
+<hr>
+
+<h3>Notes on the model</h3>
+<ul>
+  <li>Purely geometric: the optical path of each arm is computed for an ideal
+      spherical (or plane) wave; no diffraction or extended-source effects.</li>
+  <li>The input beam is a collimated beam passed through a thin lens of the given
+      power placed at the beamsplitter, i.e. a point source (real or virtual)
+      1/D from the beamsplitter. D = 0 is a collimated beam.</li>
+  <li>Mirror 2 is tilted by &theta;<sub>x</sub>, &theta;<sub>y</sub> about its
+      center, which deviates that arm's beam by twice the tilt angle.</li>
+  <li>Spectral intensity at each pixel is
+      S(&lambda;)&middot;[1 + cos(2&pi;&middot;OPD/&lambda;)]/2.</li>
+  <li>Color: the spectrum at each pixel is integrated against the CIE 1931
+      color matching functions, converted to sRGB, and scaled so that a fully
+      bright fringe just reaches full scale (so brightness is relative, not absolute).
+      Out-of-gamut colors are clipped.</li>
+  <li>The cone responsivity curves on the spectrum plot are the L, M and S cone
+      fundamentals (a linear transform of the same color matching functions),
+      each normalized to a peak of 1.</li>
+</ul>
+
+<script src="interferometer.js"></script>
+</body>
+</html>
